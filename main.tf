@@ -117,3 +117,57 @@ resource "azurerm_subnet_route_table_association" "assoc" {
   subnet_id      = each.value.subnet_id
   route_table_id = each.value.rt_id
 }
+
+resource "azurerm_network_security_group" "nsg" {
+  for_each = {
+    for vnet_name, vnet in var.vnets :
+    vnet_name => vnet if vnet_name != "hub"
+  }
+
+  name                = "nsg-${each.key}"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+}
+resource "azurerm_network_security_rule" "web_inbound" {
+  name                        = "allow-http"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_address_prefix       = "*"
+  destination_port_range      = "80"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.nsg["web"].name
+}
+resource "azurerm_network_security_rule" "app_inbound" {
+  name                        = "allow-from-web"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_address_prefix       = "10.1.0.0/16"
+  destination_port_range      = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.nsg["app"].name
+}
+resource "azurerm_network_security_rule" "db_inbound" {
+  name                        = "allow-from-app"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_address_prefix       = "10.2.0.0/16"
+  destination_port_range      = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.nsg["db"].name
+}
+resource "azurerm_subnet_network_security_group_association" "nsg_assoc" {
+  for_each = {
+    for vnet_name, subnets in module.network.subnet_ids :
+    vnet_name => subnets if vnet_name != "hub"
+  }
+
+  subnet_id = module.network.subnet_ids[each.key][keys(each.value)[0]]
+
+  network_security_group_id = azurerm_network_security_group.nsg[each.key].id
+}
